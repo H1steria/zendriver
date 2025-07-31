@@ -122,6 +122,59 @@ async def cf_is_interactive_challenge_present(tab: Tab, timeout: float = 5) -> b
     logger.debug(f"Challenge present: {is_present}")
     return is_present
 
+async def check_input(
+    input_el: Element, current_sltr: str, host_el: Element, ckbx_clckd: bool
+) -> bool:
+    """Checks if the input element is still present and without a value."""
+    try:
+        # Re-find the challenge elements to ensure they are not stale,
+        # as the iframe can be reloaded.
+        tab = host_el.tab
+        fresh_host_el, _, fresh_iframe = await cf_find_interactive_challenge(tab)
+
+        # If the iframe is gone, the challenge is likely solved or bypassed.
+        if not fresh_iframe:
+            logger.debug(
+                "Challenge iframe no longer found. Assuming challenge is complete."
+            )
+            return False
+
+        # The host element should also be present if the iframe is.
+        if not fresh_host_el:
+            # This case should be unlikely if the iframe is found, but we handle it.
+            logger.debug(
+                "Challenge host element not found, but iframe is. Assuming completion."
+            )
+            return False
+
+        fresh_input = await fresh_host_el.query_selector(current_sltr)
+
+        if (fresh_input and fresh_input.attrs.get("value")) or (
+            not fresh_input and ckbx_clckd
+        ):
+            # If the input disappears or gets a value, assume it's successfully completed.
+            logger.debug("Input element check successful (disappeared or has value).")
+            return False
+        return True
+    except Exception as e:
+        # logger.debug(f"Error checking input element (it may be stale): {e!r}")
+        # error_str = str(e).lower()
+        # if (
+        #     "no node with given id found" in error_str
+        #     or "node with given id does not belong to the document" in error_str
+        # ):
+        #     # This error means the element is stale.
+        #     # If it happened after a click, we assume success.
+        #     if ckbx_clckd:
+        #         logger.debug(
+        #             "Input element became stale after click. Assuming success."
+        #         )
+        #         return False
+        #     # If it happened before a click, the element might just be loading.
+        #     # We will try to find it again in the next iteration.
+        #     return True
+        # For other unexpected errors, re-raise.
+        raise Exception(f"Error checking input element: {e}.")
 
 async def verify_cf(
     tab: Tab,
@@ -227,23 +280,6 @@ async def verify_cf(
         return
 
     checkbox_clicked = False
-
-    async def check_input(
-        input_el: Element, current_sltr: str, host_el: Element, ckbx_clckd: bool
-    ) -> bool:
-        """Checks if the input element is still present and without a value."""
-        if not input_el:
-            return False
-        try:
-            await input_el
-            fresh_input = await host_el.query_selector(current_sltr)
-        except Exception as e:
-            raise Exception(f"Error checking input element: {e}.")
-        if (input_el.attrs.get("value") or not fresh_input) and ckbx_clckd:
-            # If the input disappears or gets a value, assume it's successfully completed.
-            logger.debug("Input element check successful (disappeared or has value).")
-            return False
-        return True
 
     while await check_input(
         input_el=input_element,
